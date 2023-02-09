@@ -45,7 +45,7 @@ ganache-cli --gasPrice 0 -k berlin
 
 In a second window, type
 ```bash
-truffle test
+yarn test --network local
 ```
 This command should compile and deploy all necessary contracts, as well as run some example code. You can see this example code in the test file [zsc.js](./packages/protocol/test/zsc.js).
 

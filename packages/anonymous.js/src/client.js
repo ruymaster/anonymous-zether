@@ -324,7 +324,7 @@ class Client {
                 zsc.simulateAccounts([bn128.serialize(account.keypair['y'])], getEpoch())
                     .then((result) => {
                         const deserialized = ElGamal.deserialize(result[0]);
-                        const C = deserialized.plus(new BN(-value));
+                        const C = deserialized.plus(new BN(-value));                        
                         const proof = Service.proveBurn(C, account.keypair['y'], state.lastRollOver, home, account.keypair['x'], state.available - value);
                         const u = utils.u(state.lastRollOver, account.keypair['x']);
                         zsc.zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize(), { gasLimit: 6721975 })

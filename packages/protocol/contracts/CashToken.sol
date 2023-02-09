@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache License 2.0
-pragma solidity ^0.7.0;
+pragma solidity >=0.7.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 

@@ -1,15 +1,13 @@
-// SPDX-License-Identifier: Apache License 2.0
-pragma solidity ^0.7.0;
-pragma experimental ABIEncoderV2;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.17;
+
 
 import "./Utils.sol";
-import "./InnerProductVerifier.sol";
+import "./InnerVerifier.sol";
 
-contract BurnVerifier {
+library BurnVerifier {
     using Utils for uint256;
     using Utils for Utils.G1Point;
-
-    InnerProductVerifier ip;
 
     struct BurnStatement {
         Utils.G1Point CLn;
@@ -34,11 +32,7 @@ contract BurnVerifier {
         uint256 s_b;
         uint256 s_tau;
 
-        InnerProductVerifier.InnerProductProof ipProof;
-    }
-
-    constructor(address _ip) {
-        ip = InnerProductVerifier(_ip);
+        InnerProductProof ipProof;
     }
 
     function verifyBurn(Utils.G1Point memory CLn, Utils.G1Point memory CRn, Utils.G1Point memory y, uint256 epoch, Utils.G1Point memory u, address sender, bytes memory proof) public view returns (bool) {
@@ -127,13 +121,13 @@ contract BurnVerifier {
         ipAuxiliaries.u_x = Utils.h().mul(ipAuxiliaries.o);
         ipAuxiliaries.hPrimes = new Utils.G1Point[](32);
         for (uint256 i = 0; i < 32; i++) {
-            ipAuxiliaries.hPrimes[i] = ip.hs(i).mul(burnAuxiliaries.ys[i].inv());
+            ipAuxiliaries.hPrimes[i] = InnerVerifier.hs(i).mul(burnAuxiliaries.ys[i].inv());
             ipAuxiliaries.hPrimeSum = ipAuxiliaries.hPrimeSum.add(ipAuxiliaries.hPrimes[i].mul(burnAuxiliaries.ys[i].mul(burnAuxiliaries.z).add(burnAuxiliaries.twoTimesZSquared[i])));
         }
         ipAuxiliaries.P = proof.BA.add(proof.BS.mul(burnAuxiliaries.x)).add(gSum().mul(burnAuxiliaries.z.neg())).add(ipAuxiliaries.hPrimeSum);
         ipAuxiliaries.P = ipAuxiliaries.P.add(Utils.h().mul(proof.mu.neg()));
         ipAuxiliaries.P = ipAuxiliaries.P.add(ipAuxiliaries.u_x.mul(proof.tHat));
-        require(ip.verifyInnerProduct(ipAuxiliaries.hPrimes, ipAuxiliaries.u_x, ipAuxiliaries.P, proof.ipProof, ipAuxiliaries.o), "Inner product proof verification failed.");
+        require(InnerVerifier.verifyInnerProduct(ipAuxiliaries.hPrimes, ipAuxiliaries.u_x, ipAuxiliaries.P, proof.ipProof, ipAuxiliaries.o), "Inner product proof verification failed.");
 
         return true;
     }
@@ -152,7 +146,7 @@ contract BurnVerifier {
         proof.s_b = uint256(Utils.slice(arr, 384));
         proof.s_tau = uint256(Utils.slice(arr, 416));
 
-        InnerProductVerifier.InnerProductProof memory ipProof;
+        InnerProductProof memory ipProof;
         ipProof.L = new Utils.G1Point[](5);
         ipProof.R = new Utils.G1Point[](5);
         for (uint256 i = 0; i < 5; i++) { // 2^5 = 32.

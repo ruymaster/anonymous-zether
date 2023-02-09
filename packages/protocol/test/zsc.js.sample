@@ -12,6 +12,8 @@ contract("ZSC", async (accounts) => {
     it("should allow minting and approving", async () => {
         const cash = await CashToken.deployed();
         const zsc = await ZSC.deployed();
+        await zsc.init();
+        await zsc.setToken(cash.address);
         await cash.mint(accounts[0], 1000);
         await cash.approve(zsc.contract._address, 1000);
         const balance = await cash.balanceOf.call(accounts[0]);
@@ -23,7 +25,7 @@ contract("ZSC", async (accounts) => {
     });
 
     it("should allow initialization", async () => {
-        const zsc = await ZSC.deployed();
+        const zsc = await ZSC.deployed();        
         alice = new Client(web3, zsc.contract, accounts[0]);
         await alice.register();
     });
@@ -54,7 +56,7 @@ contract("ZSC", async (accounts) => {
             10,
             "Transfer failed"
         );
-        const fee = await zsc.fee.call();
+        const fee = await zsc.getFee.call();
         assert.equal(
             miner.account.balance(),
             fee,
@@ -91,7 +93,7 @@ contract("ZSC", async (accounts) => {
             30,
             "Transfer failed"
         );
-        const fee = await zsc.fee.call();
+        const fee = await zsc.getFee.call();
         assert.equal(
             miner.account.balance(),
             fee,

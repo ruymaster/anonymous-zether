@@ -3,13 +3,11 @@ import * as dotenv from 'dotenv';
 import { HardhatUserConfig, task } from 'hardhat/config';
 import '@nomiclabs/hardhat-etherscan';
 import '@nomiclabs/hardhat-waffle';
-import 'hardhat-diamond-abi';
 import 'hardhat-abi-exporter';
 import '@typechain/hardhat';
 import 'hardhat-gas-reporter';
 import 'solidity-coverage';
 import '@nomiclabs/hardhat-ethers';
-import '@foundry-rs/hardhat-anvil';
 
 dotenv.config();
 
@@ -59,7 +57,7 @@ function filterDuplicateFunctions(
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: '0.7.0',
+    version: '0.8.17',
     settings: {
       optimizer: {
         enabled: true,
@@ -68,61 +66,19 @@ const config: HardhatUserConfig = {
     },
   },  
   networks: {
-    hardhat: {
-      forking: process.env.FORK_URL
-        ? {
-            url: process.env.FORK_URL,
-            blockNumber: parseInt(process.env.FORK_BLOCK_NUMBER) || undefined,
-          }
-        : undefined,
+    hardhat: {      
       chainId: 1337,
-    },
-    anvil: {
-      url: 'http://localhost:8545',
-      forking: process.env.FORK_URL
-        ? {
-            url: process.env.FORK_URL,
-            blockNumber: parseInt(process.env.FORK_BLOCK_NUMBER) || undefined,
-          }
-        : undefined,
-      chainId: 31337
-    },
-    ropsten: {
-      url: process.env.ROPSTEN_URL || '',
-      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    },
-    mumbai: {
-      url: 'https://matic-mumbai.chainstacklabs.com',
-      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    },
-    polygon: {
-      url: `https://polygon-mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
-      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    }
+    }   
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
     currency: 'USD',
-  },
-  etherscan: {
-    apiKey: {
-      goerli: process.env.ETHERSCAN_API_KEY !== undefined ? process.env.ETHERSCAN_API_KEY : '',
-      polygonMumbai:
-        process.env.POLYGONSCAN_API_KEY !== undefined ? process.env.POLYGONSCAN_API_KEY : '',
-      polygon: process.env.POLYGONSCAN_API_KEY !== undefined ? process.env.POLYGONSCAN_API_KEY : '',
-    },
-  },
+  }, 
   abiExporter: {
     flat: true,
     spacing: 2,
     pretty: true,
-  },
-  diamondAbi: {
-    name: 'IrrigationDiamond',
-    strict: false,
-    exclude: ['hardhat-diamond-abi/.*'],
-    filter: filterDuplicateFunctions,
-  },
+  }  
 };
 
 export default config;

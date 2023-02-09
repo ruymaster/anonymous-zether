@@ -1,19 +1,17 @@
-// SPDX-License-Identifier: Apache License 2.0
-pragma solidity ^0.7.0;
-pragma experimental ABIEncoderV2;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.17;
 
 import "./Utils.sol";
-import "./InnerProductVerifier.sol";
+import "./InnerVerifier.sol";
 
-contract ZetherVerifier {
+library ZetherVerifier {
     using Utils for uint256;
     using Utils for Utils.G1Point;
 
     uint256 constant UNITY = 0x14a3074b02521e3b1ed9852e5028452693e87be4e910500c7ba9bbddb2f46edd; // primitive 2^28th root of unity modulo q.
     uint256 constant TWO_INV = 0x183227397098d014dc2822db40c0ac2e9419f4243cdcb848a1f0fac9f8000001; // 2^{-1} modulo q
-
-    InnerProductVerifier ip;
-    uint256 public constant fee = 0; // set this to be the "transaction fee". can be any integer under MAX.
+    
+    uint256 constant fee = 0; // set this to be the "transaction fee". can be any integer under MAX.
 
     struct ZetherStatement {
         Utils.G1Point[] CLn;
@@ -54,11 +52,7 @@ contract ZetherVerifier {
         uint256 s_b;
         uint256 s_tau;
 
-        InnerProductVerifier.InnerProductProof ipProof;
-    }
-
-    constructor(address _ip) {
-        ip = InnerProductVerifier(_ip);
+        InnerProductProof ipProof;
     }
 
     function verifyTransfer(Utils.G1Point[] memory CLn, Utils.G1Point[] memory CRn, Utils.G1Point[] memory C, Utils.G1Point memory D, Utils.G1Point[] memory y, uint256 epoch, Utils.G1Point memory u, bytes memory proof) public view returns (bool) {
@@ -144,10 +138,10 @@ contract ZetherVerifier {
         }
 
         for (uint256 k = 0; k < 2 * anonAuxiliaries.m; k++) {
-            anonAuxiliaries.temp = anonAuxiliaries.temp.add(ip.gs(k).mul(anonAuxiliaries.f[k][1]));
-            anonAuxiliaries.temp = anonAuxiliaries.temp.add(ip.hs(k).mul(anonAuxiliaries.f[k][1].mul(anonAuxiliaries.f[k][0])));
+            anonAuxiliaries.temp = anonAuxiliaries.temp.add(InnerVerifier.gs(k).mul(anonAuxiliaries.f[k][1]));
+            anonAuxiliaries.temp = anonAuxiliaries.temp.add(InnerVerifier.hs(k).mul(anonAuxiliaries.f[k][1].mul(anonAuxiliaries.f[k][0])));
         }
-        anonAuxiliaries.temp = anonAuxiliaries.temp.add(ip.hs(2 * anonAuxiliaries.m).mul(anonAuxiliaries.f[0][1].mul(anonAuxiliaries.f[anonAuxiliaries.m][1])).add(ip.hs(2 * anonAuxiliaries.m + 1).mul(anonAuxiliaries.f[0][0].mul(anonAuxiliaries.f[anonAuxiliaries.m][0]))));
+        anonAuxiliaries.temp = anonAuxiliaries.temp.add(InnerVerifier.hs(2 * anonAuxiliaries.m).mul(anonAuxiliaries.f[0][1].mul(anonAuxiliaries.f[anonAuxiliaries.m][1])).add(InnerVerifier.hs(2 * anonAuxiliaries.m + 1).mul(anonAuxiliaries.f[0][0].mul(anonAuxiliaries.f[anonAuxiliaries.m][0]))));
         require(proof.B.mul(anonAuxiliaries.w).add(proof.A).eq(anonAuxiliaries.temp.add(Utils.h().mul(proof.z_A))), "Recovery failure for B^w * A.");
 
         anonAuxiliaries.r = assemblePolynomials(anonAuxiliaries.f);
@@ -222,13 +216,13 @@ contract ZetherVerifier {
         ipAuxiliaries.u_x = Utils.h().mul(ipAuxiliaries.o);
         ipAuxiliaries.hPrimes = new Utils.G1Point[](64);
         for (uint256 i = 0; i < 64; i++) {
-            ipAuxiliaries.hPrimes[i] = ip.hs(i).mul(zetherAuxiliaries.ys[i].inv());
+            ipAuxiliaries.hPrimes[i] = InnerVerifier.hs(i).mul(zetherAuxiliaries.ys[i].inv());
             ipAuxiliaries.hPrimeSum = ipAuxiliaries.hPrimeSum.add(ipAuxiliaries.hPrimes[i].mul(zetherAuxiliaries.ys[i].mul(zetherAuxiliaries.z).add(zetherAuxiliaries.twoTimesZSquared[i])));
         }
         ipAuxiliaries.P = proof.BA.add(proof.BS.mul(zetherAuxiliaries.x)).add(gSum().mul(zetherAuxiliaries.z.neg())).add(ipAuxiliaries.hPrimeSum);
         ipAuxiliaries.P = ipAuxiliaries.P.add(Utils.h().mul(proof.mu.neg()));
         ipAuxiliaries.P = ipAuxiliaries.P.add(ipAuxiliaries.u_x.mul(proof.tHat));
-        require(ip.verifyInnerProduct(ipAuxiliaries.hPrimes, ipAuxiliaries.u_x, ipAuxiliaries.P, proof.ipProof, ipAuxiliaries.o), "Inner product proof verification failed.");
+        require(InnerVerifier.verifyInnerProduct(ipAuxiliaries.hPrimes, ipAuxiliaries.u_x, ipAuxiliaries.P, proof.ipProof, ipAuxiliaries.o), "Inner product proof verification failed.");
 
         return true;
     }
@@ -377,7 +371,7 @@ contract ZetherVerifier {
         proof.s_b = uint256(Utils.slice(arr, 576 + starting));
         proof.s_tau = uint256(Utils.slice(arr, 608 + starting));
 
-        InnerProductVerifier.InnerProductProof memory ipProof;
+        InnerProductProof memory ipProof;
         ipProof.L = new Utils.G1Point[](6);
         ipProof.R = new Utils.G1Point[](6);
         for (uint256 i = 0; i < 6; i++) { // 2^6 = 64.

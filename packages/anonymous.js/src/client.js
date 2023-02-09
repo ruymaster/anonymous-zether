@@ -9,7 +9,7 @@ const bn128 = require('./utils/bn128.js');
 const sleep = (wait) => new Promise((resolve) => { setTimeout(resolve, wait); });
 
 class Client {
-    constructor(web3, zsc, home) {
+    constructor(web3, zsc, home, signers) {
         if (web3 === undefined)
             throw "Constructor's first argument should be an initialized Web3 object.";
         if (zsc === undefined)
@@ -41,44 +41,39 @@ class Client {
             // the 20-millisecond buffer is designed to give the callback time to fire (see below).
         };
 
-        zsc.events.TransferOccurred({}) // i guess this will just filter for "from here on out."
-            // an interesting prospect is whether balance recovery could be eliminated by looking at past events.
-            .on('data', (event) => {
-                if (transfers.has(event.transactionHash)) {
-                    transfers.delete(event.transactionHash);
-                    return;
-                }
-                const account = this.account;
-                if (event.returnValues['parties'] === null) return; // truffle is sometimes emitting spurious empty events??? have to avoid this case manually.
-                event.returnValues['parties'].forEach((party, i) => {
-                    if (account.keypair['y'].eq(bn128.deserialize(party))) {
-                        const blockNumber = event.blockNumber;
-                        web3.eth.getBlock(blockNumber).then((block) => {
-                            account._state = account._simulate(block.timestamp);
-                            web3.eth.getTransaction(event.transactionHash).then((transaction) => {
-                                let inputs;
-                                zsc._jsonInterface.forEach((element) => {
-                                    if (element['name'] === "zTransfer")
-                                        inputs = element['inputs'];
-                                });
-                                const parameters = web3.eth.abi.decodeParameters(inputs, "0x" + transaction.input.slice(10));
-                                const value = utils.readBalance(parameters['C'][i], parameters['D'], account.keypair['x']);
-                                if (value > 0) {
-                                    account._state.pending += value;
-                                    console.log("Transfer of " + value + " received! Balance now " + (account._state.available + account._state.pending) + ".");
-                                }
+        const onTransferOccurredEvent = (event) => {
+            if (transfers.has(event.transactionHash)) {
+                transfers.delete(event.transactionHash);
+                return;
+            }
+            const account = this.account;
+            if (event.returnValues['parties'] === null) return; // truffle is sometimes emitting spurious empty events??? have to avoid this case manually.
+            event.returnValues['parties'].forEach((party, i) => {
+                if (account.keypair['y'].eq(bn128.deserialize(party))) {
+                    const blockNumber = event.blockNumber;
+                    provider.getBlock(blockNumber).then((block) => {
+                        account._state = account._simulate(block.timestamp);
+                        provider.getTransaction(event.transactionHash).then((transaction) => {
+                            let inputs;
+                            zsc._jsonInterface.forEach((element) => {
+                                if (element['name'] === "transfer")
+                                    inputs = element['inputs'];
                             });
+                            const parameters = web3.eth.abi.decodeParameters(inputs, "0x" + transaction.input.slice(10));
+                            const value = utils.readBalance(parameters['C'][i], parameters['D'], account.keypair['x']);
+                            if (value > 0) {
+                                account._state.pending += value;
+                                console.log("Transfer of " + value + " received! Balance now " + (account._state.available + account._state.pending) + ".");
+                            }
                         });
-                    }
-                });
-                if (account.keypair['y'].eq(bn128.deserialize(event.returnValues['beneficiary']))) {
-                    account._state.pending += fee;
-                    console.log("Fee of " + fee + " received! Balance now " + (account._state.available + account._state.pending) + ".");
+                    });
                 }
-            })
-            .on('error', (error) => {
-                console.log(error); // when will this be called / fired...?! confusing. also, test this.
             });
+            if (account.keypair['y'].eq(bn128.deserialize(event.returnValues['beneficiary']))) {
+                account._state.pending += fee;
+                console.log("Fee of " + fee + " received! Balance now " + (account._state.available + account._state.pending) + ".");
+            }
+        };
 
         this.account = new function() {
             this.keypair = undefined;
@@ -126,30 +121,31 @@ class Client {
         };
 
         this.register = (secret) => {
-            return Promise.all([zsc.methods.getEpochLength().call(), zsc.methods.getFee().call()]).then((result) => {
+            return Promise.all([zsc.getEpochLength(), zsc.getFee()]).then((result) => {
                 epochLength = parseInt(result[0]);
                 fee = parseInt(result[1]);
                 return new Promise((resolve, reject) => {
                     if (secret === undefined) {
                         const keypair = utils.createAccount();
-                        const [c, s] = utils.sign(zsc._address, keypair);
-                        zsc.methods.register(bn128.serialize(keypair['y']), c, s).send({ 'from': home, 'gas': 6721975 })
-                            .on('transactionHash', (hash) => {
-                                console.log("Registration submitted (txHash = \"" + hash + "\").");
-                            })
-                            .on('receipt', (receipt) => {
-                                that.account.keypair = keypair;
-                                console.log("Registration successful.");
-                                resolve();
-                            })
-                            .on('error', (error) => {
-                                console.log("Registration failed: " + error);
-                                reject(error);
-                            });
+                        const [c, s] = utils.sign(zsc.address, keypair);
+                        zsc.register(bn128.serialize(keypair['y']), c, s, {gasLimit: 6721975}).then(
+                            (tx) => {
+                                console.log("Registration submitted (txHash = \"" + tx.hash + "\").");
+                                tx.wait().then((result) => {
+                                    that.account.keypair = keypair;
+                                    console.log("Registration successful.");
+                                    resolve();
+                                })
+                            }
+                        ).catch((error) => {
+                            console.log("Registration failed: " + error);
+                            reject(error);
+                        });
+
                     } else {
                         const x = new BN(secret.slice(2), 16).toRed(bn128.q);
                         that.account.keypair = { 'x': x, 'y': bn128.curve.g.mul(x) };
-                        zsc.methods.simulateAccounts([bn128.serialize(this.account.keypair['y'])], getEpoch() + 1).call().then((result) => {
+                        zsc.simulateAccounts([bn128.serialize(this.account.keypair['y'])], getEpoch() + 1).then((result) => {
                             const simulated = result[0];
                             that.account._state.available = utils.readBalance(simulated[0], simulated[1], x);
                             console.log("Account recovered successfully.");
@@ -166,20 +162,20 @@ class Client {
             const account = this.account;
             console.log("Initiating deposit.");
             return new Promise((resolve, reject) => {
-                zsc.methods.zDeposit(bn128.serialize(account.keypair['y']), value).send({ 'from': home, 'gas': 6721975 })
-                    .on('transactionHash', (hash) => {
-                        console.log("Deposit submitted (txHash = \"" + hash + "\").");
-                    })
-                    .on('receipt', (receipt) => {
-                        account._state = account._simulate(); // have to freshly call it
-                        account._state.pending += value;
-                        console.log("Deposit of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
-                        resolve(receipt);
-                    })
-                    .on('error', (error) => {
-                        console.log("Deposit failed: " + error);
-                        reject(error);
-                    });
+                zsc.zDeposit(bn128.serialize(account.keypair['y']), value).then(
+                    tx => {
+                        console.log("Deposit submitted (txHash = \"" + tx.hash + "\").");
+                        tx.wait().then(receipt => {
+                            account._state = account._simulate(); // have to freshly call it
+                            account._state.pending += value;
+                            console.log("Deposit of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
+                            resolve(receipt);
+                        })
+                    }
+                ).catch(error => {
+                    console.log("Deposit failed: " + error);
+                    reject(error);
+                })
             });
         };
 
@@ -249,7 +245,7 @@ class Client {
                 index[1] = index[1] + (index[1] % 2 === 0 ? 1 : -1);
             } // make sure you and your friend have opposite parity
             return new Promise((resolve, reject) => {
-                zsc.methods.simulateAccounts(y.map(bn128.serialize), getEpoch()).call().then((result) => {
+                zsc.simulateAccounts(y.map(bn128.serialize), getEpoch()).then((result) => {
                     const deserialized = result.map((account) => ElGamal.deserialize(account));
                     if (deserialized.some((account) => account.zero()))
                         return reject(new Error("Please make sure all parties (including decoys) are registered.")); // todo: better error message, i.e., which friend?
@@ -262,28 +258,42 @@ class Client {
                     const Cn = deserialized.map((account, i) => account.add(C[i]));
                     const proof = Service.proveTransfer(Cn, C, y, state.lastRollOver, account.keypair['x'], r, value, state.available - value - fee, index, fee);
                     const u = utils.u(state.lastRollOver, account.keypair['x']);
-                    const throwaway = web3.eth.accounts.create();
+                    // const throwaway = web3.eth.accounts.create();
                     const beneficiaryKey = beneficiary === undefined ? bn128.zero : friends[beneficiary];
-                    const encoded = zsc.methods.zTransfer(C.map((ciphertext) => bn128.serialize(ciphertext.left())), bn128.serialize(D), y.map(bn128.serialize), bn128.serialize(u), proof.serialize(), bn128.serialize(beneficiaryKey)).encodeABI();
-                    const tx = { 'to': zsc._address, 'data': encoded, 'gas': 7721975, 'nonce': 0 };
-                    web3.eth.accounts.signTransaction(tx, throwaway.privateKey).then((signed) => {
-                        web3.eth.sendSignedTransaction(signed.rawTransaction)
-                            .on('transactionHash', (hash) => {
-                                transfers.add(hash);
-                                console.log("Transfer submitted (txHash = \"" + hash + "\").");
-                            })
-                            .on('receipt', (receipt) => {
-                                account._state = account._simulate(); // have to freshly call it
-                                account._state.nonceUsed = true;
-                                account._state.pending -= value + fee;
-                                console.log("Transfer of " + value + " (with fee of " + fee + ") was successful. Balance now " + (account._state.available + account._state.pending) + ".");
-                                resolve(receipt);
-                            })
-                            .on('error', (error) => {
-                                console.log("Transfer failed: " + error);
-                                reject(error);
-                            });
+                    zsc.connect(signers[1 + parseInt(Math.random() * 8)]).zTransfer(C.map((ciphertext) => bn128.serialize(ciphertext.left())), bn128.serialize(D), y.map(bn128.serialize), bn128.serialize(u), proof.serialize(), bn128.serialize(beneficiaryKey), { gasLimit: 7721975 }).then(tx => {
+                        transfers.add(tx.hash);
+                        console.log("Transfer submitted (txHash = \"" + tx.hash + "\").");
+                        tx.wait(receipt => {
+                            account._state = account._simulate(); // have to freshly call it
+                            account._state.nonceUsed = true;
+                            account._state.pending -= value + fee;
+                            console.log("Transfer of " + value + " (with fee of " + fee + ") was successful. Balance now " + (account._state.available + account._state.pending) + ".");
+                            resolve(receipt);
+                        })
+                    }
+                    ).catch(error => {
+                        console.log("Transfer failed: " + error);
+                        reject(error);
                     });
+                    // const tx = { 'to': zsc.address, 'data': encoded, 'gas': 7721975, 'nonce': 0 };
+                    // web3.eth.accounts.signTransaction(tx, throwaway.privateKey).then((signed) => {
+                    //     web3.eth.sendSignedTransaction(signed.rawTransaction)
+                    //         .on('transactionHash', (hash) => {
+                    //             transfers.add(hash);
+                    //             console.log("Transfer submitted (txHash = \"" + hash + "\").");
+                    //         })
+                    //         .on('receipt', (receipt) => {
+                    //             account._state = account._simulate(); // have to freshly call it
+                    //             account._state.nonceUsed = true;
+                    //             account._state.pending -= value + fee;
+                    //             console.log("Transfer of " + value + " (with fee of " + fee + ") was successful. Balance now " + (account._state.available + account._state.pending) + ".");
+                    //             resolve(receipt);
+                    //         })
+                    //         .on('error', (error) => {
+                    //             console.log("Transfer failed: " + error);
+                    //             reject(error);
+                    //         });
+                    // });
                 });
             });
         };
@@ -311,26 +321,28 @@ class Client {
                 return sleep(wait).then(() => this.withdraw(value));
             }
             return new Promise((resolve, reject) => {
-                zsc.methods.simulateAccounts([bn128.serialize(account.keypair['y'])], getEpoch()).call()
+                zsc.simulateAccounts([bn128.serialize(account.keypair['y'])], getEpoch())
                     .then((result) => {
                         const deserialized = ElGamal.deserialize(result[0]);
                         const C = deserialized.plus(new BN(-value));
                         const proof = Service.proveBurn(C, account.keypair['y'], state.lastRollOver, home, account.keypair['x'], state.available - value);
                         const u = utils.u(state.lastRollOver, account.keypair['x']);
-                        zsc.methods.zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize()).send({ 'from': home, 'gas': 6721975 })
-                            .on('transactionHash', (hash) => {
-                                console.log("Withdrawal submitted (txHash = \"" + hash + "\").");
-                            })
-                            .on('receipt', (receipt) => {
-                                account._state = account._simulate(); // have to freshly call it
-                                account._state.nonceUsed = true;
-                                account._state.pending -= value;
-                                console.log("Withdrawal of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
-                                resolve(receipt);
-                            }).on('error', (error) => {
-                                console.log("Withdrawal failed: " + error);
-                                reject(error);
+                        zsc.zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize(), { gasLimit: 6721975 })
+                            .then((tx) => {
+                                console.log("Withdrawal submitted (txHash = \"" + tx.hash + "\").");
+                                tx.wait().then(receipt => {
+                                    account._state = account._simulate(); // have to freshly call it
+                                    account._state.nonceUsed = true;
+                                    account._state.pending -= value;
+                                    console.log("Withdrawal of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
+                                    resolve(receipt);
+                                })
+                            }).catch(error => {
+                                console.log('zWithdraw failed', error);
                             });
+                    }).catch(error => {
+                        console.log("Withdrawal failed: " + error);
+                        reject(error);
                     });
             });
         };

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache License 2.0
-pragma solidity ^0.7.0;
+pragma solidity >=0.7.0;
 pragma experimental ABIEncoderV2;
 
 import "./CashToken.sol";
 import "./Utils.sol";
-import "./InnerProductVerifier.sol";
 import "./ZetherVerifier.sol";
 import "./BurnVerifier.sol";
 
@@ -13,8 +12,6 @@ contract ZSC {
     using Utils for Utils.G1Point;
 
     CashToken coin;
-    ZetherVerifier zetherVerifier;
-    BurnVerifier burnVerifier;
     uint256 public epochLength;
     uint256 public fee;
 
@@ -29,13 +26,11 @@ contract ZSC {
     event TransferOccurred(Utils.G1Point[] parties, Utils.G1Point beneficiary);
     // arg is still necessary for transfers---not even so much to know when you received a transfer, as to know when you got rolled over.
 
-    constructor(address _coin, address _zether, address _burn, uint256 _epochLength) { // visibiility won't be needed in 7.0
+    constructor(address _coin, uint256 _epochLength) { // visibiility won't be needed in 7.0
         // epoch length, like block.time, is in _seconds_. 4 is the minimum!!! (To allow a withdrawal to go through.)
         coin = CashToken(_coin);
-        zetherVerifier = ZetherVerifier(_zether);
-        burnVerifier = BurnVerifier(_burn);
         epochLength = _epochLength;
-        fee = zetherVerifier.fee();
+        fee = ZetherVerifier.fee;
         Utils.G1Point memory empty;
         pending[keccak256(abi.encode(empty))][1] = Utils.g(); // "register" the empty account...
     }
@@ -90,17 +85,17 @@ contract ZSC {
         pending[yHash][1] = Utils.g();
     }
 
-    function fund(Utils.G1Point memory y, uint256 bTransfer) public {
+    function fund(Utils.G1Point memory y, uint32 bTransfer) public {
         bytes32 yHash = keccak256(abi.encode(y));
         require(registered(yHash), "Account not yet registered.");
         rollOver(yHash);
 
-        require(bTransfer <= MAX, "Deposit amount out of range."); // uint, so other way not necessary?
-
+        // require(bTransfer <= MAX, "Deposit amount out of range."); // uint, so other way not necessary?
+        uint256 amount = uint256(bTransfer);
         Utils.G1Point memory scratch = pending[yHash][0];
-        scratch = scratch.add(Utils.g().mul(bTransfer));
+        scratch = scratch.add(Utils.g().mul(amount));
         pending[yHash][0] = scratch;
-        require(coin.transferFrom(msg.sender, address(this), bTransfer), "Transfer from sender failed.");
+        require(coin.transferFrom(msg.sender, address(this), amount), "Transfer from sender failed.");
         require(coin.balanceOf(address(this)) <= MAX, "Fund pushes contract past maximum value.");
     }
 
@@ -135,7 +130,7 @@ contract ZSC {
         }
         nonceSet.push(uHash);
 
-        require(zetherVerifier.verifyTransfer(CLn, CRn, C, D, y, lastGlobalUpdate, u, proof), "Transfer proof verification failed!");
+        require(ZetherVerifier.verifyTransfer(CLn, CRn, C, D, y, lastGlobalUpdate, u, proof), "Transfer proof verification failed!");
 
         emit TransferOccurred(y, beneficiary);
     }
@@ -157,7 +152,7 @@ contract ZSC {
         }
         nonceSet.push(uHash);
 
-        require(burnVerifier.verifyBurn(scratch[0], scratch[1], y, lastGlobalUpdate, u, msg.sender, proof), "Burn proof verification failed!");
+        require(BurnVerifier.verifyBurn(scratch[0], scratch[1], y, lastGlobalUpdate, u, msg.sender, proof), "Burn proof verification failed!");
         require(coin.transfer(msg.sender, bTransfer), "This shouldn't fail... Something went severely wrong.");
     }
 }

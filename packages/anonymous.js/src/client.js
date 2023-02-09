@@ -58,7 +58,7 @@ class Client {
                             web3.eth.getTransaction(event.transactionHash).then((transaction) => {
                                 let inputs;
                                 zsc._jsonInterface.forEach((element) => {
-                                    if (element['name'] === "transfer")
+                                    if (element['name'] === "zTransfer")
                                         inputs = element['inputs'];
                                 });
                                 const parameters = web3.eth.abi.decodeParameters(inputs, "0x" + transaction.input.slice(10));
@@ -126,7 +126,7 @@ class Client {
         };
 
         this.register = (secret) => {
-            return Promise.all([zsc.methods.epochLength().call(), zsc.methods.fee().call()]).then((result) => {
+            return Promise.all([zsc.methods.getEpochLength().call(), zsc.methods.getFee().call()]).then((result) => {
                 epochLength = parseInt(result[0]);
                 fee = parseInt(result[1]);
                 return new Promise((resolve, reject) => {
@@ -166,7 +166,7 @@ class Client {
             const account = this.account;
             console.log("Initiating deposit.");
             return new Promise((resolve, reject) => {
-                zsc.methods.fund(bn128.serialize(account.keypair['y']), value).send({ 'from': home, 'gas': 6721975 })
+                zsc.methods.zDeposit(bn128.serialize(account.keypair['y']), value).send({ 'from': home, 'gas': 6721975 })
                     .on('transactionHash', (hash) => {
                         console.log("Deposit submitted (txHash = \"" + hash + "\").");
                     })
@@ -264,7 +264,7 @@ class Client {
                     const u = utils.u(state.lastRollOver, account.keypair['x']);
                     const throwaway = web3.eth.accounts.create();
                     const beneficiaryKey = beneficiary === undefined ? bn128.zero : friends[beneficiary];
-                    const encoded = zsc.methods.transfer(C.map((ciphertext) => bn128.serialize(ciphertext.left())), bn128.serialize(D), y.map(bn128.serialize), bn128.serialize(u), proof.serialize(), bn128.serialize(beneficiaryKey)).encodeABI();
+                    const encoded = zsc.methods.zTransfer(C.map((ciphertext) => bn128.serialize(ciphertext.left())), bn128.serialize(D), y.map(bn128.serialize), bn128.serialize(u), proof.serialize(), bn128.serialize(beneficiaryKey)).encodeABI();
                     const tx = { 'to': zsc._address, 'data': encoded, 'gas': 7721975, 'nonce': 0 };
                     web3.eth.accounts.signTransaction(tx, throwaway.privateKey).then((signed) => {
                         web3.eth.sendSignedTransaction(signed.rawTransaction)
@@ -317,7 +317,7 @@ class Client {
                         const C = deserialized.plus(new BN(-value));
                         const proof = Service.proveBurn(C, account.keypair['y'], state.lastRollOver, home, account.keypair['x'], state.available - value);
                         const u = utils.u(state.lastRollOver, account.keypair['x']);
-                        zsc.methods.burn(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize()).send({ 'from': home, 'gas': 6721975 })
+                        zsc.methods.zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize()).send({ 'from': home, 'gas': 6721975 })
                             .on('transactionHash', (hash) => {
                                 console.log("Withdrawal submitted (txHash = \"" + hash + "\").");
                             })

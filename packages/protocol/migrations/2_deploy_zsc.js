@@ -13,5 +13,5 @@ module.exports = async (deployer) => {
     await deployer.deploy(BurnVerifier, { gas: 6721975 });
     await deployer.link(ZetherVerifier, ZSC);
     await deployer.link(BurnVerifier, ZSC);
-    await deployer.deploy(ZSC, CashToken.address, 6);
+    await deployer.deploy(ZSC);
 }

@@ -8,6 +8,7 @@ import '@typechain/hardhat';
 import 'hardhat-gas-reporter';
 import 'solidity-coverage';
 import '@nomiclabs/hardhat-ethers';
+import '@nomiclabs/hardhat-web3';
 
 dotenv.config();
 
@@ -60,8 +61,8 @@ const config: HardhatUserConfig = {
     version: '0.8.17',
     settings: {
       optimizer: {
-        enabled: true,
-        runs: 1000,
+        enabled: false,
+        // runs: 1000,
       },
     },
   },  

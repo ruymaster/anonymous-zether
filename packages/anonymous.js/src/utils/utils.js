@@ -24,6 +24,7 @@ utils.sign = (address, keypair) => {
 
 utils.createAccount = () => {
     const x = bn128.randomScalar();
+    // console.log('----private key', x.toString());
     const y = bn128.curve.g.mul(x);
     return { 'x': x, 'y': y };
 };

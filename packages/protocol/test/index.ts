@@ -10,7 +10,7 @@ import Client from '../../anonymous.js/src/client.js';
 import { expect } from '../scripts/common';
 
 // const { ethers } = require('hardhat');
-describe('Token contract', function () {
+describe('Testing Zether', function () {
   let alice; // will reuse...
   let bob;
   let carol;
@@ -56,8 +56,8 @@ describe('Token contract', function () {
     await cashToken.approve(zsc.address, 1000);
     
     // const web3 = new Web3('http://localhost:8545');
-    alice = new Client(web3, zsc, owner.address, signers);
-    await alice.register();
+    alice = new Client(web3, zsc, owner, signers);
+    await alice.register(process.env.ZETHER_OWNER);
     await alice.deposit(100);
     await alice.withdraw(10);
   });

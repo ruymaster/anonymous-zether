@@ -75,7 +75,7 @@ class Client {
             }
         };
 
-        this.account = new function() {
+        this.account = new function () {
             this.keypair = undefined;
             this._state = {
                 available: 0,
@@ -103,7 +103,7 @@ class Client {
             this.secret = () => "0x" + this.keypair['x'].toString(16, 64);
         };
 
-        this.friends = new function() {
+        this.friends = new function () {
             const friends = {};
             this.add = (name, pubkey) => {
                 // todo: checks that these are properly formed, of the right types, etc...
@@ -128,7 +128,7 @@ class Client {
                     if (secret === undefined) {
                         const keypair = utils.createAccount();
                         const [c, s] = utils.sign(zsc.address, keypair);
-                        zsc.register(bn128.serialize(keypair['y']), c, s, {gasLimit: 6721975}).then(
+                        zsc.connect(home).register(bn128.serialize(keypair['y']), c, s, { gasLimit: 6721975 }).then(
                             (tx) => {
                                 console.log("Registration submitted (txHash = \"" + tx.hash + "\").");
                                 tx.wait().then((result) => {
@@ -144,12 +144,33 @@ class Client {
 
                     } else {
                         const x = new BN(secret.slice(2), 16).toRed(bn128.q);
-                        that.account.keypair = { 'x': x, 'y': bn128.curve.g.mul(x) };
-                        zsc.simulateAccounts([bn128.serialize(this.account.keypair['y'])], getEpoch() + 1).then((result) => {
+                        const keypair = { 'x': x, 'y': bn128.curve.g.mul(x) };
+                        zsc.simulateAccounts([bn128.serialize(keypair['y'])], getEpoch() + 1).then((result) => {
                             const simulated = result[0];
-                            that.account._state.available = utils.readBalance(simulated[0], simulated[1], x);
-                            console.log("Account recovered successfully.");
-                            resolve(); // warning: won't register you. assuming you registered when you first created the account.
+                            const deserialized = ElGamal.deserialize(simulated);
+                            if (deserialized.zero()) {
+                                console.log('Account not yet registered. Registering');
+                                const [c, s] = utils.sign(zsc.address, keypair);
+                                zsc.connect(home).register(bn128.serialize(keypair['y']), c, s, { gasLimit: 6721975 }).then(
+                                    (tx) => {
+                                        console.log("Registration submitted (txHash = \"" + tx.hash + "\").");
+                                        tx.wait().then((result) => {
+                                            that.account.keypair = keypair;
+                                            console.log("Registration successful.");
+                                            resolve();
+                                        })
+                                    }
+                                ).catch((error) => {
+                                    console.log("Registration failed: " + error);
+                                    reject(error);
+                                });
+                            }
+                            else {
+                                that.account.keypair = keypair;
+                                that.account._state.available = utils.readBalance(simulated[0], simulated[1], x);
+                                console.log("Account recovered successfully.");
+                                resolve(); // warning: won't register you. assuming you registered when you first created the account.
+                            }
                         });
                     }
                 });
@@ -162,7 +183,7 @@ class Client {
             const account = this.account;
             console.log("Initiating deposit.");
             return new Promise((resolve, reject) => {
-                zsc.zDeposit(bn128.serialize(account.keypair['y']), value).then(
+                zsc.connect(home).zDeposit(bn128.serialize(account.keypair['y']), value, { gasLimit: 6721975 }).then(
                     tx => {
                         console.log("Deposit submitted (txHash = \"" + tx.hash + "\").");
                         tx.wait().then(receipt => {
@@ -321,13 +342,16 @@ class Client {
                 return sleep(wait).then(() => this.withdraw(value));
             }
             return new Promise((resolve, reject) => {
-                zsc.simulateAccounts([bn128.serialize(account.keypair['y'])], getEpoch())
+                const epoch = getEpoch();
+                zsc.simulateAccounts([bn128.serialize(account.keypair['y'])], epoch)
                     .then((result) => {
                         const deserialized = ElGamal.deserialize(result[0]);
-                        const C = deserialized.plus(new BN(-value));                        
-                        const proof = Service.proveBurn(C, account.keypair['y'], state.lastRollOver, home, account.keypair['x'], state.available - value);
+                        const C = deserialized.plus(new BN(-value));
+                        // console.log(epoch, result[0][0]);
+                        const proof = Service.proveBurn(C, account.keypair['y'], state.lastRollOver, home.address, account.keypair['x'], state.available - value);
                         const u = utils.u(state.lastRollOver, account.keypair['x']);
-                        zsc.zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize(), { gasLimit: 6721975 })
+                        // console.log(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize());
+                        zsc.connect(home).zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize(), { gasLimit: 6721975 })
                             .then((tx) => {
                                 console.log("Withdrawal submitted (txHash = \"" + tx.hash + "\").");
                                 tx.wait().then(receipt => {

@@ -1,13 +1,14 @@
 import { ContractTransaction } from 'ethers';
-import hre, { ethers, web3 } from 'hardhat';
+import hre, { ethers, network, web3 } from 'hardhat';
 import '@nomiclabs/hardhat-etherscan';
 import '@nomiclabs/hardhat-waffle';
 import '@typechain/hardhat';
 import 'hardhat-gas-reporter';
 import 'solidity-coverage';
 import '@nomiclabs/hardhat-ethers';
+import { time } from '@nomicfoundation/hardhat-network-helpers';
 import Client from '../../anonymous.js/src/client.js';
-import { expect } from '../scripts/common';
+import { expect, sleep } from '../scripts/common';
 
 // const { ethers } = require('hardhat');
 describe('Testing Zether', function () {
@@ -17,8 +18,10 @@ describe('Testing Zether', function () {
   let dave;
   let miner;
   let cashToken;
+  let zsc;
+  let signers;
   it('Deployment should assign the total supply of tokens to the owner', async function () {
-    const signers = await ethers.getSigners();
+    signers = await ethers.getSigners();
     const owner = signers[0];
     const CashTokenConstract = await ethers.getContractFactory('CashToken');
     cashToken = await CashTokenConstract.deploy();
@@ -48,17 +51,25 @@ describe('Testing Zether', function () {
     libraries['BurnVerifier'] = burnVerifier.address;
     libraries['ZetherVerifier'] = zetherVerifier.address;
     const zscConstract = await ethers.getContractFactory('ZSC', { libraries });
-    const zsc = await zscConstract.deploy();
+    zsc = await zscConstract.deploy();
     await zsc.deployed();
-    await zsc.init();
-    await zsc.setToken(cashToken.address);
+    await zsc.init(cashToken.address, 12);
     await cashToken.mint(owner.address, 1000);
-    await cashToken.approve(zsc.address, 1000);
-    
-    // const web3 = new Web3('http://localhost:8545');
-    alice = new Client(web3, zsc, owner, signers);
-    await alice.register(process.env.ZETHER_OWNER);
-    await alice.deposit(100);
-    await alice.withdraw(10);
+    await cashToken.approve(zsc.address, 1000);      
   });
+
+  it('should allow minting and approving', async () => {
+    alice = new Client(web3, zsc, signers[0], signers);
+    await alice.register(process.env.ZETHER_OWNER);  
+    await sleep(20000);
+    // syncing block time for simulation
+    let nowTime = Date.now();
+    if(network.name === 'hardhat') await time.setNextBlockTimestamp(Math.floor((nowTime + 1000 + Math.random() * 2000) / 1000));
+    await alice.deposit(100);
+    await sleep(20000);
+    // syncing block time for simulation
+    nowTime = Date.now();
+    if(network.name === 'hardhat') await time.setNextBlockTimestamp(Math.floor((nowTime + 1000 + Math.random() * 2000) / 1000));
+    await alice.withdraw(10);
+  }).timeout(120000);
 });

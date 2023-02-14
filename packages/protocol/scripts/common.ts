@@ -51,3 +51,8 @@ export function mulDivRoundingUp(a: BigNumber, b: BigNumber, d: BigNumber): BigN
 export function getSighash(funcSig: string): string {
   return ethers.utils.Interface.getSighash(Fragment.fromString(funcSig));
 }
+
+export const sleep = (wait: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, wait);
+  });

@@ -9,6 +9,7 @@ import 'hardhat-gas-reporter';
 import 'solidity-coverage';
 import '@nomiclabs/hardhat-ethers';
 import '@nomiclabs/hardhat-web3';
+import '@nomicfoundation/hardhat-network-helpers';
 
 dotenv.config();
 
@@ -38,6 +39,9 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       chainId: 1337,
+      forking: process.env.IS_FORKING ? {
+        url: `https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`
+      }: undefined
     },
     local: {
       url: 'http://localhost:8545',

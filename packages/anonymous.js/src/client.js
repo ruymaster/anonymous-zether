@@ -119,85 +119,89 @@ class Client {
                 return "Friend deleted.";
             };
         };
-
-        this.register = (secret) => {
-            return Promise.all([zsc.getEpochLength(), zsc.getFee()]).then((result) => {
-                epochLength = parseInt(result[0]);
-                fee = parseInt(result[1]);
-                return new Promise((resolve, reject) => {
-                    if (secret === undefined) {
-                        const keypair = utils.createAccount();
-                        const [c, s] = utils.sign(zsc.address, keypair);
-                        zsc.connect(home).register(bn128.serialize(keypair['y']), c, s, { gasLimit: 6721975 }).then(
-                            (tx) => {
-                                console.log("Registration submitted (txHash = \"" + tx.hash + "\").");
-                                tx.wait().then((result) => {
-                                    that.account.keypair = keypair;
-                                    console.log("Registration successful.");
-                                    resolve();
-                                })
-                            }
-                        ).catch((error) => {
-                            console.log("Registration failed: " + error);
-                            reject(error);
-                        });
-
-                    } else {
-                        const x = new BN(secret.slice(2), 16).toRed(bn128.q);
-                        const keypair = { 'x': x, 'y': bn128.curve.g.mul(x) };
-                        zsc.simulateAccounts([bn128.serialize(keypair['y'])], getEpoch() + 1).then((result) => {
-                            const simulated = result[0];
-                            const deserialized = ElGamal.deserialize(simulated);
-                            if (deserialized.zero()) {
-                                console.log('Account not yet registered. Registering');
-                                const [c, s] = utils.sign(zsc.address, keypair);
-                                zsc.connect(home).register(bn128.serialize(keypair['y']), c, s, { gasLimit: 6721975 }).then(
-                                    (tx) => {
-                                        console.log("Registration submitted (txHash = \"" + tx.hash + "\").");
-                                        tx.wait().then((result) => {
-                                            that.account.keypair = keypair;
-                                            console.log("Registration successful.");
-                                            resolve();
-                                        })
-                                    }
-                                ).catch((error) => {
-                                    console.log("Registration failed: " + error);
-                                    reject(error);
-                                });
-                            }
-                            else {
-                                that.account.keypair = keypair;
-                                that.account._state.available = utils.readBalance(simulated[0], simulated[1], x);
-                                console.log("Account recovered successfully.");
-                                resolve(); // warning: won't register you. assuming you registered when you first created the account.
-                            }
-                        });
-                    }
-                });
-            });
+        this.submitRegister = async (keypair) => {
+            const [c, s] = utils.sign(zsc.address, keypair);
+            const tx = await zsc.connect(home).register(bn128.serialize(keypair['y']), c, s, { gasLimit: 6721975 });
+            console.log("Registration submitted (txHash = \"" + tx.hash + "\").");
+            await tx.wait();
+            that.account.keypair = keypair;
+            console.log("Registration successful.");
         };
+        this.register = async (secret) => {
+            epochLength = parseInt(await zsc.getEpochLength());
+            fee = parseInt(await zsc.getFee());
+            if (secret === undefined) {
+                const keypair = utils.createAccount();
+                await this.submitRegister(keypair);
+            } else {
+                const x = new BN(secret.slice(2), 16).toRed(bn128.q);
+                const keypair = { 'x': x, 'y': bn128.curve.g.mul(x) };
+                const epoch = getEpoch() + 1;
+                const result = await zsc.simulateAccounts([bn128.serialize(keypair['y'])], epoch);
+                const simulated = result[0];
+                const deserialized = ElGamal.deserialize(simulated);
+                if (deserialized.zero()) {
+                    // if account is not registered, register this account
+                    await this.submitRegister(keypair);
+                }
+                else {
+                    that.account.keypair = keypair;
+                    that.account._state.available = utils.readBalance(simulated[0], simulated[1], x);
+                    console.log("Account recovered successfully.");
+                }
 
-        this.deposit = (value) => {
+            }            
+        };
+        this.deposit = async (value) => {
             if (this.account.keypair === undefined)
                 throw "Client's account is not yet registered!";
             const account = this.account;
             console.log("Initiating deposit.");
-            return new Promise((resolve, reject) => {
-                zsc.connect(home).zDeposit(bn128.serialize(account.keypair['y']), value, { gasLimit: 6721975 }).then(
-                    tx => {
-                        console.log("Deposit submitted (txHash = \"" + tx.hash + "\").");
-                        tx.wait().then(receipt => {
-                            account._state = account._simulate(); // have to freshly call it
-                            account._state.pending += value;
-                            console.log("Deposit of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
-                            resolve(receipt);
-                        })
-                    }
-                ).catch(error => {
-                    console.log("Deposit failed: " + error);
-                    reject(error);
-                })
-            });
+            const tx = await zsc.connect(home).zDeposit(bn128.serialize(account.keypair['y']), value, { gasLimit: 6721975 });
+            await tx.wait();
+            console.log("Deposit submitted (txHash = \"" + tx.hash + "\").");
+            account._state = account._simulate(); // have to freshly call it
+            account._state.pending += value;
+            console.log("Deposit of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
+        };
+
+        this.withdraw = async (value) => {
+            if (this.account.keypair === undefined)
+                throw "Client's account is not yet registered!";
+            const account = this.account;
+            const state = account._simulate();
+            if (value > state.available + state.pending)
+                throw "Requested withdrawal amount of " + value + " exceeds account balance of " + (state.available + state.pending) + ".";
+            let wait = away();
+            const seconds = Math.ceil(wait / 1000);
+            const plural = seconds === 1 ? "" : "s";
+            if (value > state.available) {
+                console.log("Your withdrawal has been queued. Please wait " + seconds + " second" + plural + ", for the release of your funds...");
+                await sleep(wait); await this.withdraw(value); return;
+            }
+            if (state.nonceUsed) {
+                console.log("Your withdrawal has been queued. Please wait " + seconds + " second" + plural + ", until the next epoch...");
+                await sleep(wait); await this.withdraw(value); return;
+            }
+            if(epochLength/2 + 10 > wait) { // determined empirically. IBFT, block time 1
+                console.log("Initiating withdrawal.", wait);
+                await sleep(wait);await this.withdraw(value); return;
+            }
+            const epoch = getEpoch();
+            const result = await zsc.simulateAccounts([bn128.serialize(account.keypair['y'])], epoch);            
+            const deserialized = ElGamal.deserialize(result[0]);
+            let rollover = state.lastRollOver;
+            const C = deserialized.plus(new BN(-value));
+            const proof = Service.proveBurn(C, account.keypair['y'], rollover, home.address, account.keypair['x'], state.available - value);
+            const u = utils.u(rollover, account.keypair['x']);
+            const tx = await zsc.connect(home).zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize(), { gasLimit: 6721975 });
+            console.log("Withdrawal submitted (txHash = \"" + tx.hash + "\").");
+            await tx.wait();
+            account._state = account._simulate(); // have to freshly call it
+            account._state.nonceUsed = true;
+            account._state.pending -= value;
+            console.log("Withdrawal of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
+
         };
 
         this.transfer = (name, value, decoys, beneficiary) => { // todo: make sure the beneficiary is registered.
@@ -319,57 +323,7 @@ class Client {
             });
         };
 
-        this.withdraw = (value) => {
-            if (this.account.keypair === undefined)
-                throw "Client's account is not yet registered!";
-            const account = this.account;
-            const state = account._simulate();
-            if (value > state.available + state.pending)
-                throw "Requested withdrawal amount of " + value + " exceeds account balance of " + (state.available + state.pending) + ".";
-            const wait = away();
-            const seconds = Math.ceil(wait / 1000);
-            const plural = seconds === 1 ? "" : "s";
-            if (value > state.available) {
-                console.log("Your withdrawal has been queued. Please wait " + seconds + " second" + plural + ", for the release of your funds...");
-                return sleep(wait).then(() => this.withdraw(value));
-            }
-            if (state.nonceUsed) {
-                console.log("Your withdrawal has been queued. Please wait " + seconds + " second" + plural + ", until the next epoch...");
-                return sleep(wait).then(() => this.withdraw(value));
-            }
-            if (3100 > wait) { // determined empirically. IBFT, block time 1
-                console.log("Initiating withdrawal.");
-                return sleep(wait).then(() => this.withdraw(value));
-            }
-            return new Promise((resolve, reject) => {
-                const epoch = getEpoch();
-                zsc.simulateAccounts([bn128.serialize(account.keypair['y'])], epoch)
-                    .then((result) => {
-                        const deserialized = ElGamal.deserialize(result[0]);
-                        const C = deserialized.plus(new BN(-value));
-                        // console.log(epoch, result[0][0]);
-                        const proof = Service.proveBurn(C, account.keypair['y'], state.lastRollOver, home.address, account.keypair['x'], state.available - value);
-                        const u = utils.u(state.lastRollOver, account.keypair['x']);
-                        // console.log(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize());
-                        zsc.connect(home).zWithdraw(bn128.serialize(account.keypair['y']), value, bn128.serialize(u), proof.serialize(), { gasLimit: 6721975 })
-                            .then((tx) => {
-                                console.log("Withdrawal submitted (txHash = \"" + tx.hash + "\").");
-                                tx.wait().then(receipt => {
-                                    account._state = account._simulate(); // have to freshly call it
-                                    account._state.nonceUsed = true;
-                                    account._state.pending -= value;
-                                    console.log("Withdrawal of " + value + " was successful. Balance now " + (account._state.available + account._state.pending) + ".");
-                                    resolve(receipt);
-                                })
-                            }).catch(error => {
-                                console.log('zWithdraw failed', error);
-                            });
-                    }).catch(error => {
-                        console.log("Withdrawal failed: " + error);
-                        reject(error);
-                    });
-            });
-        };
+
     }
 }
 

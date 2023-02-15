@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.17;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 import "./Utils.sol";
 import "./ZetherVerifier.sol";
 import "./BurnVerifier.sol";
 import "./TransferHelper.sol";
 import "./ZSCStorage.sol";
 
-contract ZSC {
+contract ZSC is Ownable {
     using Utils for uint256;
     using Utils for Utils.G1Point;
     using ZSCStorage for ZSCStorage.Layout;
@@ -18,7 +20,7 @@ contract ZSC {
 
     // arg is still necessary for transfers---not even so much to know when you received a transfer, as to know when you got rolled over.
 
-    function init(address _token, uint256 _epochLength) external {
+    function init(address _token, uint256 _epochLength) external onlyOwner {
         // epoch length, like block.time, is in _seconds_. 4 is the minimum!!! (To allow a withdrawal to go through.)
         ZSCStorage.layout().epochLength = _epochLength;
         ZSCStorage.layout().fee = ZetherVerifier.fee;

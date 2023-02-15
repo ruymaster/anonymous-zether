@@ -183,7 +183,7 @@ class Client {
                 console.log("Your withdrawal has been queued. Please wait " + seconds + " second" + plural + ", until the next epoch...");
                 await sleep(wait); await this.withdraw(value); return;
             }
-            if(epochLength/2 + 10 > wait) { // determined empirically. IBFT, block time 1
+            if(epochLength * 500 + 10 > wait) { // determined empirically. IBFT, block time 1
                 console.log("Initiating withdrawal.", wait);
                 await sleep(wait);await this.withdraw(value); return;
             }
